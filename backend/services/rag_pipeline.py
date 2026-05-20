@@ -42,7 +42,7 @@ def process_and_store_articles(articles):
     if documents:
         print(f"\n====CHUNKS===== ({len(documents)} total)\n")
         for i, chunk in enumerate(documents):
-            print("Chunk ",i+1,":\n"chunk)
+            print("Chunk ",i+1,":\n", chunk)
             print("\n" + "=" * 50)
 
         try:
