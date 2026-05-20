@@ -183,3 +183,47 @@ def save_user_interests(
     return {
         "message": "Interests saved successfully"
     }
+
+
+#rag pipelines start here
+from services.news_fetcher import fetch_news
+from services.rag_pipeline import process_and_store_articles
+@app.post("/fetch-news")
+def fetch_and_store_news(
+    current_user: User = Depends(
+        get_current_user
+    )
+):
+
+    db: Session = SessionLocal()
+
+    user_interests = db.query(
+        UserInterest
+    ).filter(
+        UserInterest.user_id == current_user.id
+    ).all()
+
+    stored_chunks = 0
+
+    for user_interest in user_interests:
+
+        interest = db.query(Interest).filter(
+            Interest.id == user_interest.interest_id
+        ).first()
+
+        if interest:
+
+            articles = fetch_news(
+                interest.name
+            )
+
+            stored_chunks += (
+                process_and_store_articles(
+                    articles
+                )
+            )
+
+    return {
+        "message": "News fetched successfully",
+        "chunks_stored": stored_chunks
+    }
