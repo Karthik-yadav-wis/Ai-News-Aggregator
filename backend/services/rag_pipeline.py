@@ -1,12 +1,12 @@
 import textwrap
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from services.chroma_services import vectorstore
+from langchain_community.vectorstores import FAISS
+from services.chroma_services import embedding_model, get_vectorstore, save_vectorstore
 
 text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=1000,
     chunk_overlap=200
 )
-
 BATCH_SIZE = 100
 
 def process_and_store_articles(articles):
@@ -19,22 +19,20 @@ def process_and_store_articles(articles):
         description = article.get("description") or ""
         url = article.get("url", "")
 
-        #Deduplicate by URL
+        # Deduplicate by URL
         if url in seen_urls:
             continue
         seen_urls.add(url)
 
         content = textwrap.dedent(f"""
             Title: {title}
-
             Description:
             {description}
         """).strip()
 
         chunks = text_splitter.split_text(content)
-
         for chunk in chunks:
-            if not chunk.strip():  #skip empty chunks
+            if not chunk.strip():  # skip empty chunks
                 continue
             documents.append(chunk)
             metadatas.append({"title": title, "url": url})
@@ -42,15 +40,32 @@ def process_and_store_articles(articles):
     if documents:
         print(f"\n====CHUNKS===== ({len(documents)} total)\n")
         for i, chunk in enumerate(documents):
-            print("Chunk ",i+1,":\n", chunk)
+            print("Chunk ", i + 1, ":\n", chunk)
             print("\n" + "=" * 50)
 
         try:
-            for i in range(0, len(documents), BATCH_SIZE):
-                vectorstore.add_texts(
-                    texts=documents[i:i+BATCH_SIZE],
-                    metadatas=metadatas[i:i+BATCH_SIZE]
+            vs = get_vectorstore()  
+            if vs is None:
+                vs = FAISS.from_texts(
+                    texts=documents[:BATCH_SIZE],
+                    embedding=embedding_model,
+                    metadatas=metadatas[:BATCH_SIZE]
                 )
+                for i in range(BATCH_SIZE, len(documents), BATCH_SIZE):
+                    vs.add_texts(
+                        texts=documents[i:i + BATCH_SIZE],
+                        metadatas=metadatas[i:i + BATCH_SIZE]
+                    )
+            else:
+
+                for i in range(0, len(documents), BATCH_SIZE):
+                    vs.add_texts(
+                        texts=documents[i:i + BATCH_SIZE],
+                        metadatas=metadatas[i:i + BATCH_SIZE]
+                    )
+
+            save_vectorstore(vs)
+
         except Exception as e:
             print(f"[ERROR] Failed to store chunks: {e}")
             raise
