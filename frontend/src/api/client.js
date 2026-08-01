@@ -65,5 +65,11 @@ export function getSummary(token) {
     token,
   })
 }
-
+ 
+export function getUserInterests(token) {
+  return request('/user/interests', {
+    method: 'GET',
+    token,
+  })
+}
 export { API_BASE }

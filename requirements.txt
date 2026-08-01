@@ -11,5 +11,6 @@ pydantic[email]
 langchain
 langchain-community
 langchain-ollama
+Langchain-google-genai
 langchain-text-splitters
 faiss-cpu

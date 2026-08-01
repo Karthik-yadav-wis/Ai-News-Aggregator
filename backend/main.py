@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from services.wiki_image import fetch_wikipedia_image
 
 from database import SessionLocal, engine, Base
 from models import User, Interest, UserInterest
@@ -150,7 +151,8 @@ def save_user_interests(
         ).first()
 
         if not interest:
-            interest = Interest(name=interest_name)
+            image_url = fetch_wikipedia_image(interest_name)
+            interest = Interest(name=interest_name, image_url=image_url)
             db.add(interest)
             db.commit()
             db.refresh(interest)
@@ -197,7 +199,25 @@ def fetch_and_store_news(
         "chunks_stored": stored_chunks
     }
 
+@app.get("/user/interests")
+def get_user_interests(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user_interests = db.query(UserInterest).filter(
+        UserInterest.user_id == current_user.id
+    ).all()
 
+    result = []
+    for ui in user_interests:
+        interest = db.query(Interest).filter(Interest.id == ui.interest_id).first()
+        if interest:
+            result.append({
+                "name": interest.name,
+                "image_url": interest.image_url
+            })
+
+    return {"interests": result}
 @app.get("/summary")
 def get_summary(
     current_user: User = Depends(get_current_user),

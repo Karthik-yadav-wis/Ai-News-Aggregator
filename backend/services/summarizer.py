@@ -1,12 +1,20 @@
-from langchain_ollama import ChatOllama
+import os
+from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from services.chroma_services import get_vectorstore
+from langchain_google_genai  import  ChatGoogleGenerativeAI
 
-LLM_MODEL = "llama3.2"
-CHUNKS_PER_INTEREST = 5  # how many relevant chunks to pull per topic
+load_dotenv()
 
-llm = ChatOllama(model=LLM_MODEL, temperature=0.2)
+LLM_MODEL = "gemini-flash-latest"
+CHUNKS_PER_INTEREST = 8  # how many relevant chunks to pull per topic
+
+llm = ChatGoogleGenerativeAI(
+    model=LLM_MODEL,
+    google_api_key=os.getenv("GEMINI_API_KEY"),
+    temperature=0.2,
+)
 
 prompt = ChatPromptTemplate.from_messages([
     ("system",
@@ -16,8 +24,10 @@ prompt = ChatPromptTemplate.from_messages([
      "## {topic}\n"
      "- Key point 1\n"
      "- Key point 2\n\n"
+     "- Key point 3\n\n"
      "Keep each point to one sentence. Be factual. "
-     "If there is not enough information, say so briefly instead of making things up.\n\n"
+     "Do not repeat the same point twice, even if phrased differently."
+     "If there is not enough information, give brief information about the topic\n\n"
      "Articles:\n{context}"),
     ("human", "Summarize the articles above."),
 ])

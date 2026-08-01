@@ -17,17 +17,9 @@ class Interest(Base):
 
     __tablename__ = "interests"
 
-    id = Column(
-        Integer,
-        primary_key=True,
-        index=True
-    )
-
-    name = Column(
-        String,
-        unique=True,
-        nullable=False
-    )
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+    image_url = Column(String, nullable=True)   # ← add this line
 
 class UserInterest(Base):
 

@@ -48,7 +48,7 @@ def _fetch_freenews(keyword: str, country: str = "IN") -> list[dict]:
             "https://api.freenewsapi.io/v1/news",
             headers=headers,
             params={
-                "q":        keyword,
+                "in_title":        keyword,
                 "language": "en",
                 "order_by": "recent",
                 "offset":   0,
