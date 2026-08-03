@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+python-jose[cryptography]
+pwdlib[argon2]
+python-dotenv
+requests
+pydantic[email]
+
+# LangChain / RAG
+langchain
+langchain-community
+langchain-ollama
+Langchain-google-genai
+langchain-text-splitters
+faiss-cpu

@@ -1,6 +1,20 @@
-venv/
+# Python
+backend/venv/
 __pycache__/
 *.pyc
-*.db
-chroma_db/
+
+# Environment files (contains secrets — never commit)
 .env
+backend/.env
+frontend/.env
+
+# Databases & vectorstore (local state, not source)
+backend/*.db
+backend/faiss_db/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Editor
+.vscode/

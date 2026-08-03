@@ -57,7 +57,7 @@ The application allows users to sign up, choose their interests, and receive AI-
 
 ## Database & Auth
 - Initial phase: sqlite3
-- scaledup verion: Supabase
+- scaledup version: Supabase
 - ChromaDB
 
 ## AI Models

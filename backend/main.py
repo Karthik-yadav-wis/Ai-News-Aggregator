@@ -1,40 +1,51 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from services.wiki_image import fetch_wikipedia_image
+
 from database import SessionLocal, engine, Base
-from models import User
+from models import User, Interest, UserInterest
 from auth import (
     hash_password,
     verify_password,
-    create_access_token
+    create_access_token,
+    verify_token,
 )
-from fastapi import Depends
-from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
-from auth import verify_token
-from models import (
-    User,
-    Interest,
-    UserInterest
-)
+from services.news_fetcher import fetch_news
+from services.rag_pipeline import process_and_store_articles
+from services.summarizer import summarize_interests
 
 
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 class SignupRequest(BaseModel):
     username: str
     email: str
     password: str
 
+
 class LoginRequest(BaseModel):
     email: str
     password: str
 
+
 class InterestsRequest(BaseModel):
     interests: list[str]
+
 
 def get_db():
     db = SessionLocal()
@@ -43,8 +54,11 @@ def get_db():
     finally:
         db.close()
 
-def get_current_user(token: str = Depends(oauth2_scheme)):
 
+def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
+):
     payload = verify_token(token)
 
     if payload is None:
@@ -54,8 +68,6 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
         )
 
     user_id = payload.get("user_id")
-
-    db: Session = SessionLocal()
 
     user = db.query(User).filter(
         User.id == user_id
@@ -72,11 +84,9 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
 
 @app.post("/signup")
 def signup(
-    request: SignupRequest
+    request: SignupRequest,
+    db: Session = Depends(get_db)
 ):
-
-    db: Session = SessionLocal()
-
     existing_user = db.query(User).filter(
         User.email == request.email
     ).first()
@@ -90,25 +100,20 @@ def signup(
     user = User(
         username=request.username,
         email=request.email,
-        password_hash=hash_password(
-            request.password
-        )
+        password_hash=hash_password(request.password)
     )
 
     db.add(user)
     db.commit()
 
-    return {
-        "message": "User created successfully"
-    }
+    return {"message": "User created successfully"}
+
 
 @app.post("/login")
 def login(
-    request: LoginRequest
+    request: LoginRequest,
+    db: Session = Depends(get_db)
 ):
-
-    db: Session = SessionLocal()
-
     user = db.query(User).filter(
         User.email == request.email
     ).first()
@@ -119,111 +124,118 @@ def login(
             detail="Invalid credentials"
         )
 
-    if not verify_password(
-        request.password,
-        user.password_hash
-    ):
+    if not verify_password(request.password, user.password_hash):
         raise HTTPException(
             status_code=401,
             detail="Invalid credentials"
         )
 
-    token = create_access_token(
-        {"user_id": user.id}
-    )
+    token = create_access_token({"user_id": user.id})
 
     return {
         "access_token": token,
         "token_type": "bearer"
     }
 
+
 @app.post("/user/interests")
 def save_user_interests(
     request: InterestsRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
-
-    db: Session = SessionLocal()
-
     for interest_name in request.interests:
 
-        # Check if interest exists
         interest = db.query(Interest).filter(
             Interest.name == interest_name
         ).first()
 
-        # Create interest if not exists
         if not interest:
-
-            interest = Interest(
-                name=interest_name
-            )
-
+            image_url = fetch_wikipedia_image(interest_name)
+            interest = Interest(name=interest_name, image_url=image_url)
             db.add(interest)
             db.commit()
             db.refresh(interest)
 
-        # Check relationship exists
         existing = db.query(UserInterest).filter(
             UserInterest.user_id == current_user.id,
             UserInterest.interest_id == interest.id
         ).first()
 
         if not existing:
-
             user_interest = UserInterest(
                 user_id=current_user.id,
                 interest_id=interest.id
             )
-
             db.add(user_interest)
 
     db.commit()
 
-    return {
-        "message": "Interests saved successfully"
-    }
+    return {"message": "Interests saved successfully"}
 
 
-#rag pipelines start here
-from services.news_fetcher import fetch_news
-from services.rag_pipeline import process_and_store_articles
 @app.post("/fetch-news")
 def fetch_and_store_news(
-    current_user: User = Depends(
-        get_current_user
-    )
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
-
-    db: Session = SessionLocal()
-
-    user_interests = db.query(
-        UserInterest
-    ).filter(
+    user_interests = db.query(UserInterest).filter(
         UserInterest.user_id == current_user.id
     ).all()
 
     stored_chunks = 0
 
     for user_interest in user_interests:
-
         interest = db.query(Interest).filter(
             Interest.id == user_interest.interest_id
         ).first()
 
         if interest:
-
-            articles = fetch_news(
-                interest.name
-            )
-
-            stored_chunks += (
-                process_and_store_articles(
-                    articles
-                )
-            )
+            articles = fetch_news(interest.name)
+            stored_chunks += process_and_store_articles(articles)
 
     return {
         "message": "News fetched successfully",
         "chunks_stored": stored_chunks
     }
+
+@app.get("/user/interests")
+def get_user_interests(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user_interests = db.query(UserInterest).filter(
+        UserInterest.user_id == current_user.id
+    ).all()
+
+    result = []
+    for ui in user_interests:
+        interest = db.query(Interest).filter(Interest.id == ui.interest_id).first()
+        if interest:
+            result.append({
+                "name": interest.name,
+                "image_url": interest.image_url
+            })
+
+    return {"interests": result}
+@app.get("/summary")
+def get_summary(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user_interests = db.query(UserInterest).filter(
+        UserInterest.user_id == current_user.id
+    ).all()
+
+    interest_names = []
+    for ui in user_interests:
+        interest = db.query(Interest).filter(Interest.id == ui.interest_id).first()
+        if interest:
+            interest_names.append(interest.name)
+
+    if not interest_names:
+        raise HTTPException(status_code=400, detail="No interests set")
+
+    summary = summarize_interests(interest_names)
+
+    return {"summary": summary}
