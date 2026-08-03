@@ -1,7 +1,7 @@
 import textwrap
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from services.chroma_services import embedding_model, get_vectorstore, save_vectorstore
+from services.faiss_services import embedding_model, get_vectorstore, save_vectorstore
 
 text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=1000,
