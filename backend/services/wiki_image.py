@@ -4,11 +4,6 @@ WIKI_SUMMARY_URL = "https://en.wikipedia.org/api/rest_v1/page/summary/{}"
 
 
 def fetch_wikipedia_image(topic: str) -> str | None:
-    """
-    Look up a topic on Wikipedia and return its thumbnail image URL, if any.
-    Returns None on any failure (no page found, no image, network error, etc.)
-    so callers can fall back to a placeholder without special-casing errors.
-    """
     try:
         response = requests.get(
             WIKI_SUMMARY_URL.format(topic.strip().replace(" ", "_")),
