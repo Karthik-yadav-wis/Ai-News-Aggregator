@@ -1,8 +1,14 @@
 import os
+from dotenv import load_dotenv
 from langchain_community.vectorstores import FAISS
-from langchain_ollama import OllamaEmbeddings 
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-embedding_model = OllamaEmbeddings(model="nomic-embed-text")
+load_dotenv()
+
+embedding_model = GoogleGenerativeAIEmbeddings(
+    model="models/gemini-embedding-001",
+    google_api_key=os.getenv("GEMINI_API_KEY"),
+)
 
 FAISS_PATH = "./faiss_db"
 
