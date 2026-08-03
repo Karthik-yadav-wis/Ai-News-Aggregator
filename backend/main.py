@@ -149,10 +149,12 @@ def save_user_interests(
         interest = db.query(Interest).filter(
             Interest.name == interest_name
         ).first()
+        interest_name_normalized = interest_name.strip().lower()
+        interest = db.query(Interest).filter(Interest.name == interest_name_normalized).first()
 
         if not interest:
-            image_url = fetch_wikipedia_image(interest_name)
-            interest = Interest(name=interest_name, image_url=image_url)
+            image_url = fetch_wikipedia_image(interest_name_normalized)
+            interest = Interest(name=interest_name_normalized, image_url=image_url)
             db.add(interest)
             db.commit()
             db.refresh(interest)

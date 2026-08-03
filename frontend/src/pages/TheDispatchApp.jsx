@@ -664,7 +664,7 @@ function DispatchAppInner() {
                 <div className="db-feedlist">
                   {feedArticles.map((a) => (
                     <div className="db-card" key={a.id} onClick={() => openArticle(a)}>
-                      <img src={imageForTopic(a.topic) || `https://picsum.photos/seed/${a.seed}/600/400`} alt="" />
+                      <img src={imageForTopic(a.topic)} alt="" />
                       <div className="db-card-body">
                         <div className="db-eyebrow">AI Dispatch</div>
                         <div className="db-headline">{a.topic}</div>
@@ -685,7 +685,7 @@ function DispatchAppInner() {
           {screen === "article" && activeArticle && (
             <div>
               <div className="db-articlehero">
-                <img src={imageForTopic(activeArticle.topic) || `https://picsum.photos/seed/${activeArticle.seed}/700/500`} alt="" />
+                <img src={imageForTopic(activeArticle.topic)} alt="" />
                 <div className="db-backbtn" onClick={() => setScreen("feed")}>
                   <ArrowLeft size={16} />
                 </div>
