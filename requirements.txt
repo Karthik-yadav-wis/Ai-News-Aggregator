@@ -6,11 +6,12 @@ pwdlib[argon2]
 python-dotenv
 requests
 pydantic[email]
+apscheduler
 
 # LangChain / RAG
 langchain
 langchain-community
 langchain-ollama
-Langchain-google-genai
+langchain-google-genai
 langchain-text-splitters
 faiss-cpu

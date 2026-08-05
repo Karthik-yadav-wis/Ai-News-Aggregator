@@ -1,8 +1,9 @@
-from fastapi import FastAPI, HTTPException, Depends
+from typing import Optional
+from fastapi import FastAPI, HTTPException, Depends, Body
 from fastapi.security import OAuth2PasswordBearer
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from services.wiki_image import fetch_wikipedia_image
 
 from database import SessionLocal, engine, Base
 from models import User, Interest, UserInterest
@@ -15,13 +16,13 @@ from auth import (
 from services.news_fetcher import fetch_news
 from services.rag_pipeline import process_and_store_articles
 from services.summarizer import summarize_interests
+from services.wiki_image import fetch_topic_image  
+from services.scheduler import scheduler
 
 
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
-from fastapi.middleware.cors import CORSMiddleware
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,6 +31,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
 
 class SignupRequest(BaseModel):
@@ -45,6 +48,10 @@ class LoginRequest(BaseModel):
 
 class InterestsRequest(BaseModel):
     interests: list[str]
+
+
+class FetchNewsRequest(BaseModel):
+    interests: Optional[list[str]] = None
 
 
 def get_db():
@@ -80,6 +87,17 @@ def get_current_user(
         )
 
     return user
+
+
+@app.on_event("startup")
+def start_scheduler():
+    scheduler.start()
+    print("[Scheduler] Started — refreshing all saved interests periodically")
+
+
+@app.on_event("shutdown")
+def stop_scheduler():
+    scheduler.shutdown()
 
 
 @app.post("/signup")
@@ -149,12 +167,10 @@ def save_user_interests(
         interest = db.query(Interest).filter(
             Interest.name == interest_name
         ).first()
-        interest_name_normalized = interest_name.strip().lower()
-        interest = db.query(Interest).filter(Interest.name == interest_name_normalized).first()
 
         if not interest:
-            image_url = fetch_wikipedia_image(interest_name_normalized)
-            interest = Interest(name=interest_name_normalized, image_url=image_url)
+            image_url = fetch_topic_image(interest_name)
+            interest = Interest(name=interest_name, image_url=image_url)
             db.add(interest)
             db.commit()
             db.refresh(interest)
@@ -176,31 +192,6 @@ def save_user_interests(
     return {"message": "Interests saved successfully"}
 
 
-@app.post("/fetch-news")
-def fetch_and_store_news(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    user_interests = db.query(UserInterest).filter(
-        UserInterest.user_id == current_user.id
-    ).all()
-
-    stored_chunks = 0
-
-    for user_interest in user_interests:
-        interest = db.query(Interest).filter(
-            Interest.id == user_interest.interest_id
-        ).first()
-
-        if interest:
-            articles = fetch_news(interest.name)
-            stored_chunks += process_and_store_articles(articles)
-
-    return {
-        "message": "News fetched successfully",
-        "chunks_stored": stored_chunks
-    }
-
 @app.get("/user/interests")
 def get_user_interests(
     current_user: User = Depends(get_current_user),
@@ -220,6 +211,44 @@ def get_user_interests(
             })
 
     return {"interests": result}
+
+
+@app.post("/fetch-news")
+def fetch_and_store_news(
+    payload: Optional[FetchNewsRequest] = Body(default=None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # If the frontend sent a specific list of interests, only fetch those
+    # (used when a user adds a new interest — don't re-fetch everything).
+    # If no body was sent, fall back to ALL of the user's saved interests
+    # (used for first-time onboarding and the manual refresh button).
+    if payload and payload.interests:
+        target_names = payload.interests
+    else:
+        user_interests = db.query(UserInterest).filter(
+            UserInterest.user_id == current_user.id
+        ).all()
+
+        target_names = []
+        for user_interest in user_interests:
+            interest = db.query(Interest).filter(
+                Interest.id == user_interest.interest_id
+            ).first()
+            if interest:
+                target_names.append(interest.name)
+
+    stored_chunks = 0
+    for name in target_names:
+        articles = fetch_news(name)
+        stored_chunks += process_and_store_articles(articles, db,name)
+
+    return {
+        "message": "News fetched successfully",
+        "chunks_stored": stored_chunks
+    }
+
+
 @app.get("/summary")
 def get_summary(
     current_user: User = Depends(get_current_user),

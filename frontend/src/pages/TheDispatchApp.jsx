@@ -3,7 +3,7 @@ import {
   Search, Settings2, ArrowLeft, X, Plus, Check,
   TrendingUp, Landmark, Cpu, Trophy, Palette, FlaskConical,
   Globe2, DollarSign, Newspaper, Swords, Leaf, Rocket,
-  Wifi, BatteryFull, SignalHigh, Clock, ChevronRight, Eye, EyeOff
+  Wifi, BatteryFull, SignalHigh, Clock, ChevronRight, Eye, EyeOff, RefreshCw
 } from "lucide-react";
 import { AuthProvider, useAuth } from "../context/AuthContext.jsx";
 import { signup as apiSignup, login as apiLogin, saveInterests, fetchNews, getSummary, getUserInterests } from "../api/client.js";
@@ -117,6 +117,7 @@ function DispatchAppInner() {
   const [activeArticle, setActiveArticle] = useState(null);
   const [feedArticles, setFeedArticles] = useState([]);
   const [topicImages, setTopicImages] = useState({}); // lowercase label -> image_url from backend
+  const [savedIds, setSavedIds] = useState([]); // interests already fetched at least once
 
   const allInterests = useMemo(
     () => [...INTEREST_DEFS, ...customInterests],
@@ -189,15 +190,38 @@ function DispatchAppInner() {
     return saved.map((entry) => idForLabel(entry.name));
   };
 
-  // Pulls news + a summary for whatever is in `selected` and builds feed cards.
-  const loadFeedForSelected = async (authToken, ids) => {
-    const labels = ids.map(interestLabel).filter(Boolean);
-    if (labels.length === 0 || !authToken) return;
+  // Builds feed cards from whatever's currently in the vector store,
+  // without triggering any new fetch. Used on sign-in — the background
+  // scheduler keeps articles fresh, so login doesn't need to fetch itself.
+  const summarizeOnly = async (authToken) => {
+    const summaryResult = await getSummary(authToken);
+    const sections = parseSummary(summaryResult?.summary || "");
+    const cards = sections.map((section, idx) => ({
+      id: idx,
+      interestId: interestIdForTopic(section.topic),
+      topic: section.topic,
+      source: "AI Dispatch",
+      time: "Just now",
+      seed: slugify(section.topic) || "dispatch",
+      bullets: section.bullets,
+      paragraphs: section.paragraphs,
+    }));
+    setFeedArticles(cards);
+  };
 
-    await saveInterests(authToken, labels);
+  // Saves the full interest list, optionally fetches news for only a
+  // subset of it (fetchOnlyIds), then re-summarizes everything. Pass
+  // fetchOnlyIds = null to fetch for the full `allIds` list (first-time
+  // setup); pass an empty array to skip fetching entirely and just
+  // re-summarize (nothing new was added).
+  const loadFeedForSelected = async (authToken, allIds, fetchOnlyIds = null) => {
+    const allLabels = allIds.map(interestLabel).filter(Boolean);
+    if (allLabels.length === 0 || !authToken) return;
 
-    // Refresh the image map — this also picks up Wikipedia images for
-    // any brand-new custom topics that just got created server-side.
+    await saveInterests(authToken, allLabels);
+
+    // Refresh the image map — also picks up Wikipedia images for any
+    // brand-new custom topics that just got created server-side.
     try {
       const data = await getUserInterests(authToken);
       const images = {};
@@ -211,21 +235,33 @@ function DispatchAppInner() {
       // Non-fatal — feed will just fall back to placeholder images.
     }
 
-    await fetchNews(authToken);
-    const summaryResult = await getSummary(authToken);
-    const sections = parseSummary(summaryResult?.summary || "");
+    const fetchLabels = fetchOnlyIds === null
+      ? allLabels
+      : fetchOnlyIds.map(interestLabel).filter(Boolean);
 
-    const cards = sections.map((section, idx) => ({
-      id: idx,
-      interestId: interestIdForTopic(section.topic),
-      topic: section.topic,
-      source: "AI Dispatch",
-      time: "Just now",
-      seed: slugify(section.topic) || "dispatch",
-      bullets: section.bullets,
-      paragraphs: section.paragraphs,
-    }));
-    setFeedArticles(cards);
+    if (fetchLabels.length > 0) {
+      await fetchNews(authToken, fetchLabels);
+    }
+
+    await summarizeOnly(authToken);
+    setSavedIds(allIds);
+  };
+
+  // Manual refresh button on the feed — re-fetches news for whatever's
+  // currently selected, on demand, instead of waiting for the scheduler.
+  const refreshFeed = async () => {
+    if (selected.length === 0 || !token) return;
+    setErrorMsg("");
+    setBusy(true);
+    try {
+      const labels = selected.map(interestLabel).filter(Boolean);
+      await fetchNews(token, labels);
+      await summarizeOnly(token);
+    } catch (err) {
+      setErrorMsg(err.message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const imageForTopic = (topic) =>
@@ -269,7 +305,10 @@ function DispatchAppInner() {
       if (ids.length === 0) ids = DEFAULT_SIGNIN_IDS;
 
       setSelected(ids);
-      await loadFeedForSelected(data.access_token, ids);
+      setSavedIds(ids);
+      // No fetch here — the background scheduler keeps articles fresh
+      // independent of login. Just summarize what's already stored.
+      await summarizeOnly(data.access_token);
       setScreen("feed");
     } catch (err) {
       setErrorMsg(err.message);
@@ -283,7 +322,7 @@ function DispatchAppInner() {
     setErrorMsg("");
     setBusy(true);
     try {
-      await loadFeedForSelected(token, selected);
+      await loadFeedForSelected(token, selected, null); // first save — fetch everything
       setScreen("feed");
     } catch (err) {
       setErrorMsg(err.message);
@@ -296,7 +335,12 @@ function DispatchAppInner() {
     setErrorMsg("");
     setBusy(true);
     try {
-      await loadFeedForSelected(token, selected);
+      // Only fetch news for interests that weren't already saved before —
+      // existing ones are kept fresh by the background scheduler, no need
+      // to re-fetch them just because the user tweaked their list.
+      const newlyAdded = selected.filter((id) => !savedIds.includes(id));
+      const fetchTargets = savedIds.length === 0 ? null : newlyAdded;
+      await loadFeedForSelected(token, selected, fetchTargets);
       setScreen("feed");
     } catch (err) {
       setErrorMsg(err.message);
@@ -422,7 +466,9 @@ function DispatchAppInner() {
 
         /* ---- Feed ---- */
         .db-feedtop { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px 10px; }
+        .db-feedtop-actions { display: flex; align-items: center; gap: 8px; }
         .db-settingsbtn { width: 34px; height: 34px; border-radius: 50%; background: #F6F1E4; border: 1px solid #C9B896; display: flex; align-items: center; justify-content: center; color: #6E2A2A; cursor: pointer; }
+        .db-settingsbtn.busy { opacity: 0.5; pointer-events: none; }
         .db-feedlist { padding: 4px 16px 24px; display: flex; flex-direction: column; gap: 16px; }
         .db-card { background: #F6F1E4; border: 1px solid #C9B896; border-radius: 10px; overflow: hidden; cursor: pointer; box-shadow: 0 4px 10px -6px rgba(62,46,34,0.25); }
         .db-card img { width: 100%; height: 140px; object-fit: cover; display: block; border-bottom: 1px solid #C9B896; }
@@ -645,8 +691,13 @@ function DispatchAppInner() {
             <div>
               <div className="db-feedtop">
                 <Masthead small />
-                <div className="db-settingsbtn" onClick={() => setScreen("editPrefs")}>
-                  <Settings2 size={16} />
+                <div className="db-feedtop-actions">
+                  <div className={"db-settingsbtn" + (busy ? " busy" : "")} onClick={refreshFeed} title="Refresh">
+                    <RefreshCw size={15} />
+                  </div>
+                  <div className="db-settingsbtn" onClick={() => setScreen("editPrefs")} title="Preferences">
+                    <Settings2 size={16} />
+                  </div>
                 </div>
               </div>
               <div className="db-rule-double" />
@@ -664,7 +715,7 @@ function DispatchAppInner() {
                 <div className="db-feedlist">
                   {feedArticles.map((a) => (
                     <div className="db-card" key={a.id} onClick={() => openArticle(a)}>
-                      <img src={imageForTopic(a.topic)} alt="" />
+                      <img src={imageForTopic(a.topic) || `https://picsum.photos/seed/${a.seed}/600/400`} alt="" />
                       <div className="db-card-body">
                         <div className="db-eyebrow">AI Dispatch</div>
                         <div className="db-headline">{a.topic}</div>
@@ -685,7 +736,7 @@ function DispatchAppInner() {
           {screen === "article" && activeArticle && (
             <div>
               <div className="db-articlehero">
-                <img src={imageForTopic(activeArticle.topic)} alt="" />
+                <img src={imageForTopic(activeArticle.topic) || `https://picsum.photos/seed/${activeArticle.seed}/700/500`} alt="" />
                 <div className="db-backbtn" onClick={() => setScreen("feed")}>
                   <ArrowLeft size={16} />
                 </div>

@@ -52,10 +52,11 @@ export function saveInterests(token, interests) {
   })
 }
 
-export function fetchNews(token) {
+export function fetchNews(token, interests) {
   return request('/fetch-news', {
     method: 'POST',
     token,
+    body: interests && interests.length ? { interests } : undefined,
   })
 }
 
@@ -65,11 +66,12 @@ export function getSummary(token) {
     token,
   })
 }
- 
+
 export function getUserInterests(token) {
   return request('/user/interests', {
     method: 'GET',
     token,
   })
 }
+
 export { API_BASE }
